@@ -27,8 +27,8 @@ def main():
                         help='path to an annotated CONLL test file')
     parser.add_argument('--ds_name', type=str, default='ptb',
                         help='dataset name')
-    parser.add_argument('--model_path',
-                        help='path to a pretrained model', type=str, default=None)
+    parser.add_argument('--model_dir',
+                        help='trained model directory', type=str, default=None)
     parser.add_argument('--ext_emb',
                         help='path to an external word embeddings file', default=None)
     parser.add_argument('--seed', type=int, default=1234,
@@ -63,12 +63,11 @@ def main():
 
     # define experiment path
     if args.do_eval:
-        assert 'in evaluation mode, a model must be provided.', \
-            args.model_path is not None and os.path.isfile(args.model_path)
-        args.experiment_dir = os.path.dirname(args.model_path)
+        assert 'in evaluation mode, a trained model directory must be provided.', \
+            args.model_dir is not None and os.path.isdir(args.model_dir)
+        args.experiment_dir = args.model_dir
     else:
         args.experiment_dir = generate_exp_name(args)
-
         if not os.path.exists(args.experiment_dir):
             os.makedirs(args.experiment_dir)
 
@@ -94,8 +93,11 @@ def main():
     args.device = torch.device('cuda' if use_cuda else 'cpu')
 
     # create vocabulary
-    words_count, w2i, r2i, p2i = vocab(args.train_path)
-    save_obj([words_count, w2i, r2i, p2i], args.experiment_dir, 'vocab')
+    if args.do_eval:
+        words_count, w2i, r2i, p2i = load_obj(os.path.join(args.model_dir, 'vocab.pkl'))
+    else:
+        words_count, w2i, r2i, p2i = vocab(args.train_path)
+        save_obj([words_count, w2i, r2i, p2i], args.experiment_dir, 'vocab')
     logger.info(f'Vocab statistics: words - {len(w2i)} | relations - {len(r2i)} | POS tags - {len(p2i)}')
 
     # load external word embeddings
@@ -104,41 +106,31 @@ def main():
     else:
         ex_w2i, ex_word_vectors = None, None
 
-    # set up training, validation and test data
-    train_set = DependencyDataSet(words_count, w2i, r2i, p2i, args.train_path)
-    dev_set = DependencyDataSet(words_count, w2i, r2i, p2i, args.dev_path)
-    test_set = DependencyDataSet(words_count, w2i, r2i, p2i, args.test_path)
-
-    train_gen = DataLoader(train_set, shuffle=True)
-    dev_gen = DataLoader(dev_set, shuffle=False)
-    test_gen = DataLoader(test_set, shuffle=False)
-
     # parser initialization
     parser = BISTParser(w_emb_dim=args.w_emb_dim,
                         pos_emb_dim=args.pos_emb_dim,
                         lstm_hid_dim=args.lstm_hid_dim,
                         mlp_hid_dim=args.mlp_hid_dim,
                         n_lstm_l=args.n_lstm_layers,
-                        n_arc_relations=train_set.n_unique_rel,
-                        w_i_counter=train_set.w_i_counts,
-                        w2i=train_set.w2i,
-                        p2i=train_set.p2i,
+                        n_arc_relations=len(r2i),
+                        w_i_counter={w2i[w]: count for w, count in words_count.items()},
+                        w2i=w2i,
+                        p2i=p2i,
                         alpha=args.alpha,
                         device=args.device,
                         ext_emb_w2i=ex_w2i,
                         ex_w_vec=ex_word_vectors).to(args.device)
 
-    if args.model_path is not None:
-        # load pretrained model weights
-        best_parser_path = args.model_path
-        parser.load_state_dict(torch.load(best_parser_path, map_location=args.device))
-        parser.to(args.device)
-    else:
-        best_parser_path = None
-
-    optimizer = Adam(parser.parameters(), lr=args.lr)
-
     if not args.do_eval:
+
+        # set up training and development data
+        train_set = DependencyDataSet(w2i, r2i, p2i, args.train_path)
+        dev_set = DependencyDataSet(w2i, r2i, p2i, args.dev_path)
+
+        train_gen = DataLoader(train_set, shuffle=True)
+        dev_gen = DataLoader(dev_set, shuffle=False)
+
+        optimizer = Adam(parser.parameters(), lr=args.lr)
 
         train_stats = defaultdict(list)
         best_uas = 0.
@@ -160,10 +152,14 @@ def main():
                 logger.info("---UAS was improved. The current parser was saved.---")
 
         save_obj(train_stats, args.experiment_dir, 'train_stats')
+    else:
+        # set up test data
+        test_set = DependencyDataSet(w2i, r2i, p2i, args.test_path)
+        test_gen = DataLoader(test_set, shuffle=False)
 
-    # load & test the best model
-    parser.load_state_dict(torch.load(best_parser_path, map_location=args.device))
-    evaluate(args, parser, test_gen, logger, data_split='test')
+        # load & test the provided model
+        parser.load_state_dict(torch.load(os.path.join(args.model_dir, 'parser.pt'), map_location=args.device))
+        evaluate(args, parser, test_gen, logger, data_split='test')
 
 
 def train(args, parser, train_gen, optimizer, logger):

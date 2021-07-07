@@ -6,7 +6,7 @@ from constants import *
 
 
 class DependencyDataSet(Dataset):
-    def __init__(self, words_count, w2i, r2i, p2i, data_path):
+    def __init__(self, w2i, r2i, p2i, data_path):
         super().__init__()
 
         self.data_path = data_path
@@ -15,8 +15,6 @@ class DependencyDataSet(Dataset):
         self.p2i = p2i
 
         self.i2r = list(self.r2i.keys())
-        self.n_unique_rel = len(self.r2i)
-        self.w_i_counts = {self.w2i[w]: count for w, count in words_count.items()}
 
         # read the data
         self.sentences, self.pos_tags, self.gold_trees, self.relations, self.dep_graph_gold = self._data_reader()
