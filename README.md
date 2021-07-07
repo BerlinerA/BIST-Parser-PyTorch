@@ -1,4 +1,4 @@
-# Graph based dependency parsing using BiLSTM feature extractors.
+# Graph-based dependency parsing using BiLSTM feature extractors
 
 A PyTorch implementation of the BIST graph-based parser as described 
 in the paper [Simple and Accurate Dependency Parsing Using Bidirectional LSTM Feature Representations](https://www.transacl.org/ojs/index.php/tacl/article/viewFile/885/198).
